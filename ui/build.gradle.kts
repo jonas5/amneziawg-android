@@ -8,10 +8,25 @@ val pkg: String = providers.gradleProperty("amneziawgPackageName").get()
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.kapt)
+    alias(libs.plugins.kotlin.kapt) // or use id("org.jetbrains.kotlin.kapt")
 }
 
+kapt {
+    keepJavacAnnotationProcessors = true
+}
+
+kapt {
+    javacOptions {
+        option("--add-exports", "jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED")
+    }
+}
+
+
 android {
+    sourceSets {
+        getByName("main").java.srcDirs("src/main/java")
+        getByName("release").java.srcDirs("src/release/java")
+    }
     buildFeatures {
         buildConfig = true
         dataBinding = true
@@ -79,6 +94,10 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.kotlinx.coroutines.android)
     coreLibraryDesugaring(libs.desugarJdkLibs)
+    compileOnly("org.projectlombok:lombok:1.18.24")
+    annotationProcessor("org.projectlombok:lombok:1.18.24")
+    kapt("org.projectlombok:lombok:1.18.24")
+    kapt("com.squareup.moshi:moshi-kotlin-codegen:1.15.0") // example
 }
 
 tasks.withType<JavaCompile>().configureEach {
