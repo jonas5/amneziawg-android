@@ -14,10 +14,12 @@ import android.util.Log;
 
 import org.amnezia.awg.backend.BackendException.Reason;
 import org.amnezia.awg.backend.Tunnel.State;
+import org.amnezia.awg.config.BadConfigException;
 import org.amnezia.awg.util.SharedLibraryLoader;
 import org.amnezia.awg.config.Config;
 import org.amnezia.awg.config.InetEndpoint;
 import org.amnezia.awg.config.InetNetwork;
+import org.amnezia.awg.config.Interface;
 import org.amnezia.awg.config.Peer;
 import org.amnezia.awg.crypto.Key;
 import org.amnezia.awg.crypto.KeyFormatException;
@@ -203,11 +205,42 @@ public final class GoBackend implements Backend {
             if (currentTunnel != null)
                 setStateInternal(currentTunnel, null, State.DOWN);
             try {
+                // Try UDP first
                 setStateInternal(tunnel, config, state);
             } catch (final Exception e) {
-                if (originalTunnel != null)
-                    setStateInternal(originalTunnel, originalConfig, State.UP);
-                throw e;
+                // If UDP fails, try TCP
+                Log.i(TAG, "UDP connection failed, trying TCP");
+                try {
+                    // Create a new config with the protocol set to TCP
+                    final Config.Builder tcpConfigBuilder = new Config.Builder();
+                    tcpConfigBuilder.setInterface(config.getInterface());
+                    for (final Peer peer : config.getPeers()) {
+                        final Peer.Builder tcpPeerBuilder = new Peer.Builder();
+                        try {
+                            tcpPeerBuilder.parsePublicKey(peer.getPublicKey().toBase64());
+                            for (final InetNetwork allowedIp : peer.getAllowedIps()) {
+                                tcpPeerBuilder.addAllowedIp(allowedIp);
+                            }
+                            peer.getEndpoint().ifPresent(tcpPeerBuilder::setEndpoint);
+                            peer.getPersistentKeepalive().ifPresent(pk -> {
+                                try {
+                                    tcpPeerBuilder.setPersistentKeepalive(pk);
+                                } catch (final BadConfigException ignored) {
+                                    // This should not happen, as we are using a valid value.
+                                }
+                            });
+                            peer.getPreSharedKey().ifPresent(tcpPeerBuilder::setPreSharedKey);
+                            tcpConfigBuilder.addPeer(tcpPeerBuilder.build());
+                        } catch (final BadConfigException ignored) {
+                            // This should not happen, as we are using a valid value.
+                        }
+                    }
+                    setStateInternal(tunnel, tcpConfigBuilder.build(), state);
+                } catch (final Exception e2) {
+                    if (originalTunnel != null)
+                        setStateInternal(originalTunnel, originalConfig, State.UP);
+                    throw e2;
+                }
             }
         } else if (state == State.DOWN && tunnel == currentTunnel) {
             setStateInternal(tunnel, null, State.DOWN);

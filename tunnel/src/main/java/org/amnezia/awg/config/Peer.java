@@ -35,6 +35,7 @@ public final class Peer {
     private final Optional<Integer> persistentKeepalive;
     private final Optional<Key> preSharedKey;
     private final Key publicKey;
+    private final Optional<String> protocol;
 
     private Peer(final Builder builder) {
         // Defensively copy to ensure immutability even if the Builder is reused.
@@ -43,6 +44,7 @@ public final class Peer {
         persistentKeepalive = builder.persistentKeepalive;
         preSharedKey = builder.preSharedKey;
         publicKey = Objects.requireNonNull(builder.publicKey, "Peers must have a public key");
+        protocol = builder.protocol;
     }
 
     /**
@@ -92,7 +94,8 @@ public final class Peer {
                 && endpoint.equals(other.endpoint)
                 && persistentKeepalive.equals(other.persistentKeepalive)
                 && preSharedKey.equals(other.preSharedKey)
-                && publicKey.equals(other.publicKey);
+                && publicKey.equals(other.publicKey)
+                && protocol.equals(other.protocol);
     }
 
     /**
@@ -141,6 +144,10 @@ public final class Peer {
         return publicKey;
     }
 
+    public Optional<String> getProtocol() {
+        return protocol;
+    }
+
     @Override
     public int hashCode() {
         int hash = 1;
@@ -149,6 +156,7 @@ public final class Peer {
         hash = 31 * hash + persistentKeepalive.hashCode();
         hash = 31 * hash + preSharedKey.hashCode();
         hash = 31 * hash + publicKey.hashCode();
+        hash = 31 * hash + protocol.hashCode();
         return hash;
     }
 
@@ -194,6 +202,7 @@ public final class Peer {
         final StringBuilder sb = new StringBuilder();
         // The order here is important: public_key signifies the beginning of a new peer.
         sb.append("public_key=").append(publicKey.toHex()).append('\n');
+        protocol.ifPresent(p -> sb.append("protocol=").append(p).append('\n'));
         for (final InetNetwork allowedIp : allowedIps)
             sb.append("allowed_ip=").append(allowedIp).append('\n');
         endpoint.flatMap(InetEndpoint::getResolved).ifPresent(ep -> sb.append("endpoint=").append(ep).append('\n'));
@@ -217,6 +226,8 @@ public final class Peer {
         private Optional<Key> preSharedKey = Optional.empty();
         // No default; must be provided before building.
         @Nullable private Key publicKey;
+        // Defaults to not present.
+        private Optional<String> protocol = Optional.empty();
 
         public Builder addAllowedIp(final InetNetwork allowedIp) {
             allowedIps.add(allowedIp);
@@ -301,6 +312,11 @@ public final class Peer {
 
         public Builder setPublicKey(final Key publicKey) {
             this.publicKey = publicKey;
+            return this;
+        }
+
+        public Builder setProtocol(final String protocol) {
+            this.protocol = Optional.of(protocol);
             return this;
         }
     }

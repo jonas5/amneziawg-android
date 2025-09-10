@@ -94,9 +94,9 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.kotlinx.coroutines.android)
     coreLibraryDesugaring(libs.desugarJdkLibs)
-    compileOnly("org.projectlombok:lombok:1.18.24")
-    annotationProcessor("org.projectlombok:lombok:1.18.24")
-    kapt("org.projectlombok:lombok:1.18.24")
+    compileOnly("org.projectlombok:lombok:1.18.32")
+    annotationProcessor("org.projectlombok:lombok:1.18.32")
+    kapt("org.projectlombok:lombok:1.18.32")
     kapt("com.squareup.moshi:moshi-kotlin-codegen:1.15.0") // example
 }
 
