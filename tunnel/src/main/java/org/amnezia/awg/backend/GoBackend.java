@@ -14,14 +14,15 @@ import android.util.Log;
 
 import org.amnezia.awg.backend.BackendException.Reason;
 import org.amnezia.awg.backend.Tunnel.State;
-import org.amnezia.awg.util.SharedLibraryLoader;
 import org.amnezia.awg.config.Config;
 import org.amnezia.awg.config.InetEndpoint;
 import org.amnezia.awg.config.InetNetwork;
 import org.amnezia.awg.config.Peer;
+import org.amnezia.awg.config.Protocol;
 import org.amnezia.awg.crypto.Key;
 import org.amnezia.awg.crypto.KeyFormatException;
 import org.amnezia.awg.util.NonNullForAll;
+import org.amnezia.awg.util.SharedLibraryLoader;
 
 import java.net.InetAddress;
 import java.util.Collections;
@@ -215,7 +216,7 @@ public final class GoBackend implements Backend {
         return getState(tunnel);
     }
 
-    private void setStateInternal(final Tunnel tunnel, @Nullable final Config config, final State state)
+    private void setStateInternal(final Tunnel tunnel, @Nullable Config config, final State state)
             throws Exception {
         Log.i(TAG, "Bringing tunnel " + tunnel.getName() + ' ' + state);
 
@@ -247,7 +248,8 @@ public final class GoBackend implements Backend {
             }
 
 
-            dnsRetry: for (int i = 0; i < DNS_RESOLUTION_RETRIES; ++i) {
+            dnsRetry:
+            for (int i = 0; i < DNS_RESOLUTION_RETRIES; ++i) {
                 // Pre-resolve IPs so they're cached when building the userspace string
                 for (final Peer peer : config.getPeers()) {
                     final InetEndpoint ep = peer.getEndpoint().orElse(null);
@@ -265,65 +267,32 @@ public final class GoBackend implements Backend {
                 break;
             }
 
-            // Build config
-            final String goConfig = config.toAwgUserspaceString();
-
-            // Create the vpn tunnel with android API
-            final VpnService.Builder builder = service.getBuilder();
-            builder.setSession(tunnel.getName());
-
-            for (final String excludedApplication : config.getInterface().getExcludedApplications())
-                builder.addDisallowedApplication(excludedApplication);
-
-            for (final String includedApplication : config.getInterface().getIncludedApplications())
-                builder.addAllowedApplication(includedApplication);
-
-            for (final InetNetwork addr : config.getInterface().getAddresses())
-                builder.addAddress(addr.getAddress(), addr.getMask());
-
-            for (final InetAddress addr : config.getInterface().getDnsServers())
-                builder.addDnsServer(addr.getHostAddress());
-
-            for (final String dnsSearchDomain : config.getInterface().getDnsSearchDomains())
-                builder.addSearchDomain(dnsSearchDomain);
-
-            boolean sawDefaultRoute = false;
-            for (final Peer peer : config.getPeers()) {
-                for (final InetNetwork addr : peer.getAllowedIps()) {
-                    if (addr.getMask() == 0)
-                        sawDefaultRoute = true;
-                    builder.addRoute(addr.getAddress(), addr.getMask());
+            // MTU negotiation loop
+            for (int mtu = 1472; mtu >= 1280; mtu -= 10) {
+                final Config udpConfig = config.newBuilder()
+                        .setInterface(config.getInterface().newBuilder().setMtu(mtu).build())
+                        .build();
+                if (tryConnect(tunnel, udpConfig, service)) {
+                    return;
                 }
             }
 
-            // "Kill-switch" semantics
-            if (!(sawDefaultRoute && config.getPeers().size() == 1)) {
-                builder.allowFamily(OsConstants.AF_INET);
-                builder.allowFamily(OsConstants.AF_INET6);
+            // TCP fallback
+            final Config.Builder tcpConfigBuilder = config.newBuilder();
+            for (final Peer peer : config.getPeers()) {
+                tcpConfigBuilder.addPeer(new Peer.Builder()
+                        .from(peer)
+                        .setProtocol(Protocol.TCP)
+                        .build());
+            }
+            final Config tcpConfig = tcpConfigBuilder.build();
+            if (tryConnect(tunnel, tcpConfig, service)) {
+                return;
             }
 
-            builder.setMtu(config.getInterface().getMtu().orElse(1280));
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-                builder.setMetered(false);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                service.setUnderlyingNetworks(null);
+            throw new BackendException(Reason.GO_ACTIVATION_ERROR_CODE, -1);
 
-            builder.setBlocking(true);
-            try (final ParcelFileDescriptor tun = builder.establish()) {
-                if (tun == null)
-                    throw new BackendException(Reason.TUN_CREATION_ERROR);
-                Log.d(TAG, "Go backend " + awgVersion());
-                currentTunnelHandle = awgTurnOn(tunnel.getName(), tun.detachFd(), goConfig);
-            }
-            if (currentTunnelHandle < 0)
-                throw new BackendException(Reason.GO_ACTIVATION_ERROR_CODE, currentTunnelHandle);
-
-            currentTunnel = tunnel;
-            currentConfig = config;
-
-            service.protect(awgGetSocketV4(currentTunnelHandle));
-            service.protect(awgGetSocketV6(currentTunnelHandle));
         } else {
             if (currentTunnelHandle == -1) {
                 Log.w(TAG, "Tunnel already down");
@@ -336,10 +305,78 @@ public final class GoBackend implements Backend {
             awgTurnOff(handleToClose);
             try {
                 vpnService.get(0, TimeUnit.NANOSECONDS).stopSelf();
-            } catch (final TimeoutException ignored) { }
+            } catch (final TimeoutException ignored) {
+            }
         }
 
         tunnel.onStateChange(state);
+    }
+
+    private boolean tryConnect(final Tunnel tunnel, final Config config, final VpnService service) throws Exception {
+        // Build config
+        final String goConfig = config.toAwgUserspaceString();
+
+        // Create the vpn tunnel with android API
+        final VpnService.Builder builder = service.getBuilder();
+        builder.setSession(tunnel.getName());
+
+        for (final String excludedApplication : config.getInterface().getExcludedApplications())
+            builder.addDisallowedApplication(excludedApplication);
+
+        for (final String includedApplication : config.getInterface().getIncludedApplications())
+            builder.addAllowedApplication(includedApplication);
+
+        for (final InetNetwork addr : config.getInterface().getAddresses())
+            builder.addAddress(addr.getAddress(), addr.getMask());
+
+        for (final InetAddress addr : config.getInterface().getDnsServers())
+            builder.addDnsServer(addr.getHostAddress());
+
+        for (final String dnsSearchDomain : config.getInterface().getDnsSearchDomains())
+            builder.addSearchDomain(dnsSearchDomain);
+
+        boolean sawDefaultRoute = false;
+        for (final Peer peer : config.getPeers()) {
+            for (final InetNetwork addr : peer.getAllowedIps()) {
+                if (addr.getMask() == 0)
+                    sawDefaultRoute = true;
+                builder.addRoute(addr.getAddress(), addr.getMask());
+            }
+        }
+
+        // "Kill-switch" semantics
+        if (!(sawDefaultRoute && config.getPeers().size() == 1)) {
+            builder.allowFamily(OsConstants.AF_INET);
+            builder.allowFamily(OsConstants.AF_INET6);
+        }
+
+        builder.setMtu(config.getInterface().getMtu().orElse(1280));
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            builder.setMetered(false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+            service.setUnderlyingNetworks(null);
+
+        builder.setBlocking(true);
+        try (final ParcelFileDescriptor tun = builder.establish()) {
+            if (tun == null)
+                throw new BackendException(Reason.TUN_CREATION_ERROR);
+            Log.d(TAG, "Go backend " + awgVersion());
+            currentTunnelHandle = awgTurnOn(tunnel.getName(), tun.detachFd(), goConfig);
+        }
+        if (currentTunnelHandle < 0) {
+            Log.e(TAG, "awgTurnOn failed with error code " + currentTunnelHandle);
+            return false;
+        }
+
+        currentTunnel = tunnel;
+        currentConfig = config;
+
+        service.protect(awgGetSocketV4(currentTunnelHandle));
+        service.protect(awgGetSocketV6(currentTunnelHandle));
+
+        tunnel.onStateChange(State.UP);
+        return true;
     }
 
     /**

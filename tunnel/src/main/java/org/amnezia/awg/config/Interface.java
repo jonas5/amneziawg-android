@@ -424,6 +424,10 @@ public final class Interface {
         return sb.toString();
     }
 
+    public Builder newBuilder() {
+        return new Builder().from(this);
+    }
+
     @SuppressWarnings("UnusedReturnValue")
     public static final class Builder {
         // Defaults to an empty set.
@@ -500,6 +504,27 @@ public final class Interface {
                 throw new BadConfigException(Section.INTERFACE, Location.INCLUDED_APPLICATIONS,
                         Reason.INVALID_KEY, null);
             return new Interface(this);
+        }
+
+        public Builder from(final Interface other) {
+            setKeyPair(other.getKeyPair());
+            addAddresses(other.getAddresses());
+            addDnsServers(other.getDnsServers());
+            addDnsSearchDomains(other.getDnsSearchDomains());
+            excludeApplications(other.getExcludedApplications());
+            includeApplications(other.getIncludedApplications());
+            other.getListenPort().ifPresent(this::setListenPort);
+            other.getMtu().ifPresent(this::setMtu);
+            other.getJunkPacketCount().ifPresent(this::setJunkPacketCount);
+            other.getJunkPacketMinSize().ifPresent(this::setJunkPacketMinSize);
+            other.getJunkPacketMaxSize().ifPresent(this::setJunkPacketMaxSize);
+            other.getInitPacketJunkSize().ifPresent(this::setInitPacketJunkSize);
+            other.getResponsePacketJunkSize().ifPresent(this::setResponsePacketJunkSize);
+            other.getInitPacketMagicHeader().ifPresent(this::setInitPacketMagicHeader);
+            other.getResponsePacketMagicHeader().ifPresent(this::setResponsePacketMagicHeader);
+            other.getUnderloadPacketMagicHeader().ifPresent(this::setUnderloadPacketMagicHeader);
+            other.getTransportPacketMagicHeader().ifPresent(this::setTransportPacketMagicHeader);
+            return this;
         }
 
         public Builder excludeApplication(final String application) {

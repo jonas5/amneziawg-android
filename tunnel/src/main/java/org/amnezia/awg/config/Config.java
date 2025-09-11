@@ -39,6 +39,10 @@ public final class Config {
         peers = Collections.unmodifiableList(new ArrayList<>(builder.peers));
     }
 
+    public Builder newBuilder() {
+        return new Builder().from(this);
+    }
+
     /**
      * Parses an series of "Interface" and "Peer" sections into a {@code Config}. Throws
      * {@link BadConfigException} if the input is not well-formed or contains data that cannot
@@ -217,6 +221,12 @@ public final class Config {
 
         public Builder setInterface(final Interface interfaze) {
             this.interfaze = interfaze;
+            return this;
+        }
+
+        public Builder from(final Config other) {
+            setInterface(other.getInterface());
+            addPeers(other.getPeers());
             return this;
         }
     }

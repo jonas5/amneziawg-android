@@ -32,6 +32,7 @@ import androidx.annotation.Nullable;
 public final class Peer {
     private final Set<InetNetwork> allowedIps;
     private final Optional<InetEndpoint> endpoint;
+    private final Optional<Protocol> protocol;
     private final Optional<Integer> persistentKeepalive;
     private final Optional<Key> preSharedKey;
     private final Key publicKey;
@@ -40,6 +41,7 @@ public final class Peer {
         // Defensively copy to ensure immutability even if the Builder is reused.
         allowedIps = Collections.unmodifiableSet(new LinkedHashSet<>(builder.allowedIps));
         endpoint = builder.endpoint;
+        protocol = builder.protocol;
         persistentKeepalive = builder.persistentKeepalive;
         preSharedKey = builder.preSharedKey;
         publicKey = Objects.requireNonNull(builder.publicKey, "Peers must have a public key");
@@ -66,6 +68,9 @@ public final class Peer {
                 case "endpoint":
                     builder.parseEndpoint(attribute.getValue());
                     break;
+                case "protocol":
+                    builder.parseProtocol(attribute.getValue());
+                    break;
                 case "persistentkeepalive":
                     builder.parsePersistentKeepalive(attribute.getValue());
                     break;
@@ -90,6 +95,7 @@ public final class Peer {
         final Peer other = (Peer) obj;
         return allowedIps.equals(other.allowedIps)
                 && endpoint.equals(other.endpoint)
+                && protocol.equals(other.protocol)
                 && persistentKeepalive.equals(other.persistentKeepalive)
                 && preSharedKey.equals(other.preSharedKey)
                 && publicKey.equals(other.publicKey);
@@ -112,6 +118,15 @@ public final class Peer {
      */
     public Optional<InetEndpoint> getEndpoint() {
         return endpoint;
+    }
+
+    /**
+     * Returns the peer's protocol.
+     *
+     * @return the protocol, or {@code Optional.empty()} if none is configured
+     */
+    public Optional<Protocol> getProtocol() {
+        return protocol;
     }
 
     /**
@@ -146,6 +161,7 @@ public final class Peer {
         int hash = 1;
         hash = 31 * hash + allowedIps.hashCode();
         hash = 31 * hash + endpoint.hashCode();
+        hash = 31 * hash + protocol.hashCode();
         hash = 31 * hash + persistentKeepalive.hashCode();
         hash = 31 * hash + preSharedKey.hashCode();
         hash = 31 * hash + publicKey.hashCode();
@@ -178,6 +194,7 @@ public final class Peer {
         if (!allowedIps.isEmpty())
             sb.append("AllowedIPs = ").append(Attribute.join(allowedIps)).append('\n');
         endpoint.ifPresent(ep -> sb.append("Endpoint = ").append(ep).append('\n'));
+        protocol.ifPresent(p -> sb.append("Protocol = ").append(p).append('\n'));
         persistentKeepalive.ifPresent(pk -> sb.append("PersistentKeepalive = ").append(pk).append('\n'));
         preSharedKey.ifPresent(psk -> sb.append("PreSharedKey = ").append(psk.toBase64()).append('\n'));
         sb.append("PublicKey = ").append(publicKey.toBase64()).append('\n');
@@ -196,7 +213,10 @@ public final class Peer {
         sb.append("public_key=").append(publicKey.toHex()).append('\n');
         for (final InetNetwork allowedIp : allowedIps)
             sb.append("allowed_ip=").append(allowedIp).append('\n');
-        endpoint.flatMap(InetEndpoint::getResolved).ifPresent(ep -> sb.append("endpoint=").append(ep).append('\n'));
+        endpoint.flatMap(InetEndpoint::getResolved).ifPresent(ep -> {
+            final String protocolPrefix = protocol.map(p -> p.toString().toLowerCase(Locale.ENGLISH) + "://").orElse("");
+            sb.append("endpoint=").append(protocolPrefix).append(ep).append('\n');
+        });
         persistentKeepalive.ifPresent(pk -> sb.append("persistent_keepalive_interval=").append(pk).append('\n'));
         preSharedKey.ifPresent(psk -> sb.append("preshared_key=").append(psk.toHex()).append('\n'));
         return sb.toString();
@@ -211,6 +231,8 @@ public final class Peer {
         private final Set<InetNetwork> allowedIps = new LinkedHashSet<>();
         // Defaults to not present.
         private Optional<InetEndpoint> endpoint = Optional.empty();
+        // Defaults to not present.
+        private Optional<Protocol> protocol = Optional.empty();
         // Defaults to not present.
         private Optional<Integer> persistentKeepalive = Optional.empty();
         // Defaults to not present.
@@ -253,6 +275,14 @@ public final class Peer {
             }
         }
 
+        public Builder parseProtocol(final String protocol) throws BadConfigException {
+            try {
+                return setProtocol(Protocol.valueOf(protocol.toUpperCase(Locale.ENGLISH)));
+            } catch (final IllegalArgumentException e) {
+                throw new BadConfigException(Section.PEER, Location.ENDPOINT, protocol, e);
+            }
+        }
+
         public Builder parsePersistentKeepalive(final String persistentKeepalive)
                 throws BadConfigException {
             try {
@@ -281,6 +311,11 @@ public final class Peer {
 
         public Builder setEndpoint(final InetEndpoint endpoint) {
             this.endpoint = Optional.of(endpoint);
+            return this;
+        }
+
+        public Builder setProtocol(final Protocol protocol) {
+            this.protocol = Optional.of(protocol);
             return this;
         }
 
